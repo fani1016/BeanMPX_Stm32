@@ -11,7 +11,9 @@ The ecu is responsible to feed information to the combination meter, if say the 
 #### Bridge: https://youtu.be/dopTZ3F5d6s
 
 
+## NOTE
 This is same library created by @fiztech-code, which is modified for Arduino Core for STM32.
+
 
 ## Code
 
