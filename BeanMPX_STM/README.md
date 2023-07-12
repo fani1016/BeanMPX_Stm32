@@ -10,11 +10,8 @@ The ecu is responsible to feed information to the combination meter, if say the 
 #### Demo: https://youtu.be/FXD5fauDTvY
 #### Bridge: https://youtu.be/dopTZ3F5d6s
 
-## Circuit
 
-Here is an example circuits to use for transmit/receive, the MCP2515 module integration can be ignored
-![bean-mpx_circuit](bean-mpx_circuit.png)
-
+This is same library created by @fiztech-code, which is modified for Arduino Core for STM32.
 
 ## Code
 
@@ -28,10 +25,8 @@ BeanMPX can send acknowledge response to messages with a particular destination 
 
 ```C++
   bean.ackMsg((const uint8_t[]) {0xFE}, 1); // Acknowledge Messages, Length
-  bean.begin(8, 9, 0); // rx pin, tx pin, timer (0 or 1);
+  bean.begin(PB8, PB9, 0); // rx pin, tx pin, timer (0 or 1);
 ```
-Bean Multiplex repeated the message 3 times if no acknowledgement was received 
-![bean-mpx_serial-monitor.png](bean-mpx_serial-monitor.png)
 
 ### Receive
 Receive message: memcpy into a buffer, 1st item is length of entire message, 2nd item is message type: R/T (Receive/Transmit), followed by entire bean frame. 
