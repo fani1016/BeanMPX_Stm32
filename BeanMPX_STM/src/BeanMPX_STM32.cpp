@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <BeanMPX.h>
 
-TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 //
 // Statics
@@ -429,10 +429,11 @@ void BeanMPX::begin(uint8_t rx, uint8_t tx, bool use_timer2) {
 
   HAL_Init();
 
-  MX_TIM1_Init();   
+  TIM2_Init();
+  timerStart();
   MX_GPIO_Init();
   txSafetyState();  
-	active_object = this; 
+  active_object = this; 
 }
 
 void BeanMPX::ackMsg(const uint8_t *destintion_id, uint8_t len) {	
@@ -477,27 +478,6 @@ void BeanMPX::sendMsg(const uint8_t *data, uint16_t datalen)
   setTimerCounter(); // set timer counter sync 	
   timerStart(); //*_timerInterruptMaskRegister |= _timerInterruptMask; // enable timer interrupt
 }
-
-//
-// Interrupt handling
-//
-
-// ISR(PCINT0_vect) {
-//   #ifdef _DEBUG
-//   PORTD ^= debug_pin3;    
-//   #endif
-//   BeanMPX::handle_sync();
-// }
-
-//
-// Enable Pin Interrupt
-//
-
-// void BeanMPX::pciSetup(byte pin) {
-//   // *digitalPinToPCMSK(pin) |= bit(digitalPinToPCMSKbit(pin)); // enable pin   //
-//   // PCIFR |= bit(digitalPinToPCICRbit(pin)); // clear any outstanding interrupt //
-//   // PCICR |= bit(digitalPinToPCICRbit(pin)); // enable interrupt for the group  //
-// }
 
 /**
   * @brief This function handles EXTI line[9:5] interrupts.
@@ -557,10 +537,10 @@ static void MX_GPIO_Init(void)
 void BeanMPX::setTimerCounter() {
 
   // Change the ARR value on-the-fly
-  TIM1->CR1 &= ~TIM_CR1_CEN; // Disable Timer 1
-  TIM1->ARR = 104;          // Set the new auto-reload value
-  TIM1->SR &= ~TIM_SR_UIF;   // Clear the update event flag
-  TIM1->CR1 |= TIM_CR1_CEN;  // Enable Timer 1 again
+  TIM2->CR1 &= ~TIM_CR1_CEN; // Disable Timer 2
+  TIM2->ARR = 104;          // Set the new auto-reload value
+  TIM2->SR &= ~TIM_SR_UIF;   // Clear the update event flag
+  TIM2->CR1 |= TIM_CR1_CEN;  // Enable Timer 2 again
 
 }
 
@@ -584,132 +564,66 @@ void setTxPinLow(void)
 
 void timerStop(void)
 {
-  HAL_TIM_Base_Stop_IT(&htim1);
+  // HAL_TIM_Base_Stop_IT(&htim2);
+  TIM2->DIER &= ~TIM_DIER_UIE;  // Disable update interrupt
+  TIM2->CR1 &= ~TIM_CR1_CEN;    // Stop the timer
 }
 
 void timerStart(void)
 {
-  HAL_TIM_Base_Start_IT(&htim1);
+  // HAL_TIM_Base_Start_IT(&htim2);
+  TIM2->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  TIM2->CR1 |= TIM_CR1_CEN;    // Start the timer
 }
 
 /**
-  * @brief This function handles TIM1 capture compare interrupt.
+  * @brief This function handles TIM2 output compare interrupt.
   */
-void TIM1_CC_IRQHandler(void)
+void TIM2_IRQHandler(void)
 {
-  /* USER CODE BEGIN TIM1_CC_IRQn 0 */
-  if(htim1.Channel == HAL_TIM_ACTIVE_CHANNEL_1)
+  if (TIM2->SR & TIM_SR_CC1IF)
   {
-  	// HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-    //OCR1A
+    TIM2->SR &= ~TIM_SR_CC1IF;
+    // Channel 1 interrupt code here
     BeanMPX::handle_rx();
     BeanMPX::handle_rx_ack();
-
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_CC1); // Clear the interrupt flag for Channel 1
-
   }
 
-  if(htim1.Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+  if (TIM2->SR & TIM_SR_CC2IF)
   {
-  	// HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-    //OCR1B
+    TIM2->SR &= ~TIM_SR_CC2IF;
+    // Channel 2 interrupt code here
     BeanMPX::handle_tx();
     BeanMPX::handle_tx_ack();
-  
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_CC2); // Clear the interrupt flag for Channel 1
-
   }
-
-  /* USER CODE END TIM1_CC_IRQn 0 */
-  // HAL_TIM_IRQHandler(&htim1);
-  /* USER CODE BEGIN TIM1_CC_IRQn 1 */
-
-  /* USER CODE END TIM1_CC_IRQn 1 */
 }
 
 /**
-  * @brief TIM1 Initialization Function
+  * @brief TIM2 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM1_Init(void)
+void TIM2_Init(void)
 {
+  RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
 
-  /* USER CODE BEGIN TIM1_Init 0 */
+  TIM2->CR1 = 0;  // Reset CR1 register
+  TIM2->PSC = 8 - 1;  // Prescaler = 8 - 1
+  TIM2->ARR = 830;  // Period = 104 µs - 1 (since it's 0-based)
 
-  /* USER CODE END TIM1_Init 0 */
+  // Channel 1
+  TIM2->CCMR1 |= TIM_CCMR1_OC1M_0;
+  TIM2->CCMR1 |= TIM_CCMR1_OC1PE;
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+  // Channel 2
+  TIM2->CCMR1 |= TIM_CCMR1_OC2M_0;
+  TIM2->CCMR1 |= TIM_CCMR1_OC2PE;
 
-  /* USER CODE BEGIN TIM1_Init 1 */
+  TIM2->CR1 |= TIM_CR1_ARPE;
+  TIM2->CR1 |= TIM_CR1_CEN;
 
-  /* USER CODE END TIM1_Init 1 */
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 8-1;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 1000;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-    /* Peripheral clock enable */
-    __HAL_RCC_TIM1_CLK_ENABLE();
-    /* TIM1 interrupt Init */
-    HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
-
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 52;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.Pulse = 0;
-  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
-  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
-  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 0;
-  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
-  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM1_Init 2 */
-
-  /* USER CODE END TIM1_Init 2 */
-
+  NVIC_SetPriority(TIM2_IRQn, 0);
+  NVIC_EnableIRQ(TIM2_IRQn);
 }
+
 
