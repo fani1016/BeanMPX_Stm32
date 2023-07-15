@@ -412,7 +412,7 @@ BeanMPX::BeanMPX() {
 void BeanMPX::begin(uint8_t rx, uint8_t tx, bool use_timer2) {	  
   HAL_Init();
   TIM2_Init();
-  MX_GPIO_Init();
+  GPIO_Init();
   txSafetyState();  
   active_object = this; 
 }
@@ -460,55 +460,47 @@ void BeanMPX::sendMsg(const uint8_t *data, uint16_t datalen)
   timerStart(); //*_timerInterruptMaskRegister |= _timerInterruptMask; // enable timer interrupt
 }
 
-/**
-  * @brief This function handles EXTI line[9:5] interrupts.
-  */
-void EXTI9_5_IRQHandler(void)
-{
-  /* USER CODE BEGIN EXTI9_5_IRQn 0 */
-  rxFlag = 1;
-  BeanMPX::handle_sync();
-  /* USER CODE END EXTI9_5_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_8);
-  /* USER CODE BEGIN EXTI9_5_IRQn 1 */
-
-  /* USER CODE END EXTI9_5_IRQn 1 */
+// External Interrupt ISR Handler CallBackFun
+void EXTI9_5_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR8) {
+	rxFlag = 1;
+	BeanMPX::handle_sync();
+	EXTI->PR |= EXTI_PR_PR8; // Clear the interrupt flag
+    }
 }
+
 
 /**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
   */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
+void GPIO_Init(void) {
+    // Enable GPIOB clock
+    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
 
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
+    // Configure PB8 as input with pull-up
+    GPIOB->CRH &= ~GPIO_CRH_MODE8; // Clear mode bits
+    GPIOB->CRH |= GPIO_CRH_CNF8_1; // Set input with pull-up mode
+    GPIOB->ODR |= GPIO_ODR_ODR8;   // Enable internal pull-up
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
+    // Configure PB9 as general-purpose output push-pull
+    GPIOB->CRH &= ~GPIO_CRH_MODE9; // Clear mode bits
+    GPIOB->CRH |= GPIO_CRH_MODE9_0; // Set output mode
+    GPIOB->CRH &= ~GPIO_CRH_CNF9;  // Set general-purpose output push-pull mode
 
-  /*Configure GPIO pin : PB8 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    // Enable AFIO clock
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
 
-  /*Configure GPIO pin : PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    // Map PB8 to EXTI8
+    AFIO->EXTICR[2] |= AFIO_EXTICR3_EXTI8_PB;
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+    // Enable interrupt on EXTI8
+    EXTI->IMR |= EXTI_IMR_MR8;
+    EXTI->FTSR |= EXTI_FTSR_TR8;
 
+    // Enable EXTI9_5 interrupt in NVIC
+    NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
 // 
