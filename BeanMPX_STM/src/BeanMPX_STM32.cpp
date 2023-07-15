@@ -357,8 +357,7 @@ void BeanMPX::syncPulse() {
     msg_stage = 0;
     i = 2;
     is_listining = true;
-	
-	  timerStart(); //*_timerInterruptMaskRegister |= _timerInterruptMask; // enable timer interrupts	
+    timerStart(); //*_timerInterruptMaskRegister |= _timerInterruptMask; // enable timer interrupts	
   }
     
   if (rx_pin_val != _rx_prev_val) {
@@ -367,53 +366,38 @@ void BeanMPX::syncPulse() {
   }  
 }
 
-
-
 //
 //	tx safety state
 //
-
 void BeanMPX::txSafetyState() {
   setTxPinLow();  //*_transmitPortRegister &= ~_transmitBitMask; // set tx pin LOW   
 }
-
 
 //
 // Static handle functions
 //
 // handle timer1
-
 inline void BeanMPX::handle_rx() {
-
-  active_object->receive();	
-  
+  active_object->receive();
 }
 
 inline void BeanMPX::handle_rx_ack() {
-  
   active_object->receiveAcknowledge();	
-  
 }
 
 inline void BeanMPX::handle_tx() {
-
   active_object->transmit();	
-
 }
 
 inline void BeanMPX::handle_tx_ack() {  
-
   active_object->transmitAcknowledge();	
-    
 }
 
 
 // handle pin interrupt
 
 inline void BeanMPX::handle_sync() {	
-
-	active_object->syncPulse();			
-
+	active_object->syncPulse();
 }
 
 
@@ -426,11 +410,8 @@ BeanMPX::BeanMPX() {
 //
 
 void BeanMPX::begin(uint8_t rx, uint8_t tx, bool use_timer2) {	  
-
   HAL_Init();
-
   TIM2_Init();
-  timerStart();
   MX_GPIO_Init();
   txSafetyState();  
   active_object = this; 
@@ -533,15 +514,8 @@ static void MX_GPIO_Init(void)
 // 
 //  set timer counter
 //
-
 void BeanMPX::setTimerCounter() {
-
-  // Change the ARR value on-the-fly
-  TIM2->CR1 &= ~TIM_CR1_CEN; // Disable Timer 2
-  TIM2->ARR = 104;          // Set the new auto-reload value
-  TIM2->SR &= ~TIM_SR_UIF;   // Clear the update event flag
-  TIM2->CR1 |= TIM_CR1_CEN;  // Enable Timer 2 again
-
+  TIM2->CNT = 3734;
 }
 
 void checkRxFlag(uint8_t *flag)
@@ -564,16 +538,15 @@ void setTxPinLow(void)
 
 void timerStop(void)
 {
-  // HAL_TIM_Base_Stop_IT(&htim2);
-  TIM2->DIER &= ~TIM_DIER_UIE;  // Disable update interrupt
-  TIM2->CR1 &= ~TIM_CR1_CEN;    // Stop the timer
+  TIM2->DIER &= ~TIM_DIER_CC1IE;
+  TIM2->DIER &= ~TIM_DIER_CC2IE;
+  // TIM2->CR1 &= ~TIM_CR1_CEN;    // Stop the timer
 }
 
 void timerStart(void)
 {
-  // HAL_TIM_Base_Start_IT(&htim2);
-  TIM2->DIER |= TIM_DIER_UIE;  // Enable update interrupt
-  TIM2->CR1 |= TIM_CR1_CEN;    // Start the timer
+  TIM2->DIER |= (TIM_DIER_CC1IE | TIM_DIER_CC2IE);
+  // TIM2->CR1 |= TIM_CR1_CEN;    // Start the timer
 }
 
 /**
@@ -583,18 +556,16 @@ void TIM2_IRQHandler(void)
 {
   if (TIM2->SR & TIM_SR_CC1IF)
   {
-    TIM2->SR &= ~TIM_SR_CC1IF;
-    // Channel 1 interrupt code here
     BeanMPX::handle_rx();
     BeanMPX::handle_rx_ack();
+    TIM2->SR &= ~TIM_SR_CC1IF;
   }
 
   if (TIM2->SR & TIM_SR_CC2IF)
   {
-    TIM2->SR &= ~TIM_SR_CC2IF;
-    // Channel 2 interrupt code here
     BeanMPX::handle_tx();
     BeanMPX::handle_tx_ack();
+    TIM2->SR &= ~TIM_SR_CC2IF;
   }
 }
 
@@ -605,25 +576,33 @@ void TIM2_IRQHandler(void)
   */
 void TIM2_Init(void)
 {
-  RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    // Enable Timer 2 clock
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
 
-  TIM2->CR1 = 0;  // Reset CR1 register
-  TIM2->PSC = 8 - 1;  // Prescaler = 8 - 1
-  TIM2->ARR = 830;  // Period = 104 µs - 1 (since it's 0-based)
+    // Configure Timer 2 for CCR1 and CCR2 compare mode
+    TIM2->CCMR1 = (TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 |
+                   TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2);
+    
+    // Set the prescaler value for a 72MHz clock
+    TIM2->PSC = 0;
 
-  // Channel 1
-  TIM2->CCMR1 |= TIM_CCMR1_OC1M_0;
-  TIM2->CCMR1 |= TIM_CCMR1_OC1PE;
+    // Set the auto-reload value for the maximum timer period
+    TIM2->ARR = 0xFFFF;
 
-  // Channel 2
-  TIM2->CCMR1 |= TIM_CCMR1_OC2M_0;
-  TIM2->CCMR1 |= TIM_CCMR1_OC2PE;
+    // Set the compare value for Channel 1 (OCR1A) for the desired time interval
+    TIM2->CCR1 = 3734; // Assuming a desired time interval of 51.875 microseconds
 
-  TIM2->CR1 |= TIM_CR1_ARPE;
-  TIM2->CR1 |= TIM_CR1_CEN;
+    // Set the compare value for Channel 2 (OCR1B) for the desired time interval
+    TIM2->CCR2 = 7312; // Assuming a desired time interval of 101.563 microseconds
 
-  NVIC_SetPriority(TIM2_IRQn, 0);
-  NVIC_EnableIRQ(TIM2_IRQn);
+    // Enable compare interrupts for CCR1 and CCR2
+    TIM2->DIER |= (TIM_DIER_CC1IE | TIM_DIER_CC2IE);
+
+    // Enable Timer 2 interrupt
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    // Start Timer 2
+    TIM2->CR1 |= TIM_CR1_CEN;
 }
 
 
