@@ -5,8 +5,8 @@
 #include <inttypes.h>
 
 
+void GPIO_Init(void);
 void TIM2_Init(void);
-static void MX_GPIO_Init(void);
 void setTxPinHigh(void);
 void setTxPinLow(void);
 void timerStop(void);
